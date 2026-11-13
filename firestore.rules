@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Roles live in users/{authUid}. Privileged changes (create user, role, enable/disable) happen ONLY in the server endpoint
+    // (Cloudflare Pages Function with admin credentials); clients can never write role/isActive.
+    function signedIn() { return request.auth != null; }
+    function hasProfile() { return exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function active() { return signedIn() && hasProfile() && me().isActive == true; }
+    function isSuper() { return active() && me().role == 'SUPER_ADMIN'; }
+    function isStaff() { return active() && me().role in ['SUPER_ADMIN', 'USER']; }
+    // The ORIGINAL Super Admin (your existing account). Replace the address, then publish. Used once, to create that account's profile.
+    function isBootstrap() { return signedIn() && request.auth.token.email_verified == true && request.auth.token.email == 'REPLACE_WITH_YOUR_EMAIL@example.com'; }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isSuper());
+      allow create: if isBootstrap() && request.auth.uid == uid && !hasProfile()
+        && request.resource.data.uid == uid && request.resource.data.role == 'SUPER_ADMIN' && request.resource.data.isActive == true;
+      // A user may only stamp their own lastLoginAt: role, isActive, email... can never be changed from the browser.
+      allow update: if active() && request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLoginAt']);
+      allow delete: if false;
+    }
+
+    // Branding and reference data: every active account reads; only Super Admins change them.
+    match /settings/{doc} { allow read: if isStaff(); allow write: if isSuper(); }
+    match /{coll}/{doc} {
+      allow read: if isStaff() && coll in ['facultyMembers', 'classrooms', 'courses', 'sections', 'academicLevels'];
+      allow write: if isSuper() && coll in ['facultyMembers', 'classrooms', 'courses', 'sections', 'academicLevels'];
+      // Day-to-day work: any active account.
+      allow read, write: if isStaff() && coll in ['students', 'courseEnrollments', 'importHistory', 'timetableEntries', 'examSchedules', 'exams'];
+    }
+    // Invigilators: administrative staff are reference data (Super Admin); assignments are day-to-day work (any active account).
+    // The exact-two-per-room and no-overlap rules are enforced by the revalidating transaction in the app; `meta/invigilation` is its version counter.
+    match /adminStaff/{id} { allow read: if isStaff(); allow write: if isSuper(); }
+    match /invigilations/{id} { allow read: if isStaff(); allow write: if isStaff() && (request.method == 'delete' || request.resource.data.examId == id); }
+    match /meta/{id} { allow read: if isStaff(); allow write: if isStaff() && id == 'invigilation'; }
+
+    // Lightweight audit trail: append-only, attributed to the signed-in account.
+    match /activityLog/{id} {
+      allow read: if isStaff();
+      allow create: if isStaff() && request.resource.data.actorUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}

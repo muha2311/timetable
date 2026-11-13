@@ -1,0 +1,5 @@
+# Local secrets for `npx wrangler pages dev` (copy to .dev.vars, which is git-ignored). NEVER commit real values.
+FIREBASE_PROJECT_ID=time-table-5ad74
+FIREBASE_WEB_API_KEY=AIzaSyD0yqG_8OWz_laKD4zlXyptQ4yei1oSals
+# The whole service-account JSON on ONE line (Firebase Console > Project settings > Service accounts > Generate new private key).
+FIREBASE_SERVICE_ACCOUNT={"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"..."}
